@@ -1,0 +1,131 @@
+:root{
+  --bg:#0B0E11;
+  --panel:#14181D;
+  --line:#242A31;
+  --text:#F2F4F5;
+  --muted:#7A8592;
+  --ready:#5B7A99;
+  --sprint:#FF5A36;
+  --steps:#A78BFA;
+  --walk:#33D6A6;
+  --done:#FFD166;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{height:100%; margin:0;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  display:flex;
+  flex-direction:column;
+  min-height:100vh;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  user-select:none;
+}
+
+/* ---- 모드 탭 ---- */
+.tabs{
+  display:flex; gap:6px;
+  width:calc(100% - 48px); max-width:360px;
+  margin:14px auto 0;
+  padding:4px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:13px;
+  transition:opacity .2s ease;
+}
+/* 세션 중에는 모드를 바꿀 수 없다. 어떤 모드로 도는지는 계속 보여준다. */
+.tabs.locked{ opacity:.4; pointer-events:none; }
+.tab{
+  flex:1; max-width:none;
+  padding:9px 0;
+  border:none; border-radius:9px;
+  background:transparent; color:var(--muted);
+  font-family:inherit; font-size:14px; font-weight:700;
+}
+.tab.is-active{ background:var(--line); color:var(--text); }
+
+.stage{
+  flex:1;
+  min-height:0;   /* 없으면 링 크기 아래로 줄지 않아 아래 요소가 잘린다 */
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:16px;
+  padding:8px 0;
+}
+.phase-label{
+  font-size:15px;
+  font-weight:700;
+  letter-spacing:.32em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+/* 3단계 모드는 설정이 7줄이라 높이가 빠듯하다. vh를 함께 걸어 링이 먼저 줄게 한다. */
+.ring-wrap{ position:relative; flex:none; width:min(66vw,300px,30vh); height:min(66vw,300px,30vh); }
+.ring-wrap svg{ width:100%; height:100%; transform:rotate(-90deg); }
+.ring-bg{ fill:none; stroke:var(--line); stroke-width:10; }
+.ring-fg{ fill:none; stroke:var(--sprint); stroke-width:10; stroke-linecap:round; transition:stroke .2s ease; }
+.ring-center{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;
+  font-variant-numeric:tabular-nums;
+  font-size:min(15vw,68px);
+  font-weight:600;
+}
+.round-label{ font-size:13px; color:var(--muted); font-weight:600; }
+
+.config{
+  display:flex; flex-direction:column; gap:10px;
+  padding:0 24px; width:100%; max-width:360px; margin:0 auto;
+}
+.field{
+  display:flex; justify-content:space-between; align-items:center;
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:13px; padding:10px 16px;
+}
+.field label{ font-size:14px; color:var(--muted); }
+.field input{
+  width:64px; text-align:right;
+  background:transparent; border:none; outline:none;
+  color:var(--text); font-size:20px; font-weight:600;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;
+  font-variant-numeric:tabular-nums;
+}
+.field input[type="checkbox"]{
+  width:24px; height:24px; margin:0;
+  accent-color:var(--sprint);
+}
+/* 구간 이름 앞의 색 점. 링/라벨 색과 같아 어느 구간인지 눈으로 잇는다. */
+.dot{
+  display:inline-block; width:8px; height:8px;
+  border-radius:50%; margin-right:8px; vertical-align:middle;
+}
+.dot-sprint{ background:var(--sprint); }
+.dot-steps{ background:var(--steps); }
+.dot-walk{ background:var(--walk); }
+
+.controls{
+  display:flex; gap:12px; justify-content:center;
+  padding:16px 24px 8px;
+}
+button{
+  border:none; border-radius:16px;
+  font-size:16px; font-weight:700;
+  padding:16px 0; flex:1; max-width:220px;
+  font-family:inherit; cursor:pointer;
+}
+.btn-primary{ background:var(--text); color:#0B0E11; }
+.btn-primary:disabled{ opacity:.5; }
+.btn-ghost{ background:var(--panel); color:var(--text); border:1px solid var(--line); }
+.btn-secondary{ background:var(--line); color:var(--text); }
+
+.hint{
+  text-align:center; color:var(--muted); font-size:12px;
+  padding:0 32px 16px; line-height:1.5;
+}
+.hidden{ display:none !important; }

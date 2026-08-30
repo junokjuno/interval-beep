@@ -101,6 +101,7 @@
     font-family:inherit; cursor:pointer;
   }
   .btn-primary{ background:var(--text); color:#0B0E11; }
+  .btn-primary:disabled{ opacity:.5; }
   .btn-ghost{ background:var(--panel); color:var(--text); border:1px solid var(--line); }
   .btn-secondary{ background:var(--line); color:var(--text); }
 
@@ -144,6 +145,8 @@
 
   <div class="hint">화면을 꺼도 소리는 계속 재생됩니다. Safari 공유 버튼 → “홈 화면에 추가”로 저장하면 앱처럼 쓸 수 있습니다.</div>
 
+  <audio id="player" preload="auto" playsinline></audio>
+
 <script>
 (function(){
   const els = {
@@ -163,13 +166,15 @@
     cfgRounds: document.getElementById('cfgRounds'),
     cfgCountdown: document.getElementById('cfgCountdown'),
   };
+  const player = document.getElementById('player');
 
   const RING_CIRC = 2 * Math.PI * 52;
   const COLORS = { ready:'#5B7A99', sprint:'#FF5A36', walk:'#33D6A6', done:'#FFD166' };
   const PHASE_TEXT = { ready:'준비', sprint:'전력질주', walk:'걷기 / 회복', done:'완료' };
+  // 비프음 최고 주파수가 880Hz라 22050Hz면 충분하고, 블롭 크기가 절반으로 줄어든다.
+  const SAMPLE_RATE = 22050;
 
-  let audioCtx = null, playBuffer = null, sourceNode = null;
-  let plan = null, isPlaying = false, pausedAt = 0, playStartCtxTime = 0, rafId = null;
+  let plan = null, rafId = null, trackUrl = null;
 
   function readConfig(){
     return {
@@ -206,9 +211,8 @@
   }
 
   async function renderTrack(p){
-    const sampleRate = 44100;
     const totalSeconds = p.total + 1.5;
-    const ctx = new OfflineAudioContext(1, Math.ceil(totalSeconds*sampleRate), sampleRate);
+    const ctx = new OfflineAudioContext(1, Math.ceil(totalSeconds*SAMPLE_RATE), SAMPLE_RATE);
     function beep(time, freq, dur, gainVal){
       const osc = ctx.createOscillator();
       osc.type = 'sine';
@@ -230,12 +234,36 @@
     return await ctx.startRendering();
   }
 
+  // 16bit PCM mono WAV. iOS는 백그라운드에서 WebAudio를 정지시키므로
+  // 렌더링 결과를 <audio> 엘리먼트가 재생할 수 있는 파일로 바꾼다.
+  function encodeWav(samples, sampleRate){
+    const dataSize = samples.length * 2;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buf);
+    let o = 0;
+    const str = s => { for(let i=0;i<s.length;i++) view.setUint8(o++, s.charCodeAt(i)); };
+    const u32 = v => { view.setUint32(o, v, true); o += 4; };
+    const u16 = v => { view.setUint16(o, v, true); o += 2; };
+    str('RIFF'); u32(36 + dataSize); str('WAVE');
+    str('fmt '); u32(16); u16(1); u16(1);
+    u32(sampleRate); u32(sampleRate*2); u16(2); u16(16);
+    str('data'); u32(dataSize);
+    for(let i=0;i<samples.length;i++){
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(o, s < 0 ? s*0x8000 : s*0x7FFF, true);
+      o += 2;
+    }
+    return new Blob([buf], {type:'audio/wav'});
+  }
+
+  function silentWavUrl(){
+    return URL.createObjectURL(encodeWav(new Float32Array(1024), SAMPLE_RATE));
+  }
+
   function findSegment(elapsed){
     for(const s of plan.segments){ if(elapsed>=s.start && elapsed<s.end) return s; }
     return plan.segments[plan.segments.length-1];
   }
-
-  function setBg(phase){ document.body.style.backgroundColor = phase==='ready' ? '#0B0E11' : '#0B0E11'; }
 
   function updateUI(elapsed){
     const seg = findSegment(elapsed);
@@ -255,33 +283,35 @@
     els.ring.setAttribute('stroke-dashoffset', RING_CIRC * (1-progress));
   }
 
-  function getElapsed(){
-    if(!isPlaying) return pausedAt;
-    return pausedAt + (audioCtx.currentTime - playStartCtxTime);
-  }
+  // 화면 표시는 오디오 자체의 재생 위치를 따라간다.
+  // 잠금 해제 후에도 소리와 어긋나지 않는다.
+  function getElapsed(){ return player.currentTime; }
 
   function tick(){
-    const elapsed = getElapsed();
-    updateUI(elapsed);
-    if(isPlaying) rafId = requestAnimationFrame(tick);
+    updateUI(getElapsed());
+    if(!player.paused) rafId = requestAnimationFrame(tick);
   }
 
-  function startPlaybackFrom(offset){
-    sourceNode = audioCtx.createBufferSource();
-    sourceNode.buffer = playBuffer;
-    sourceNode.connect(audioCtx.destination);
-    sourceNode.onended = handleEnded;
-    playStartCtxTime = audioCtx.currentTime;
-    sourceNode.start(0, offset);
-    pausedAt = offset;
-    isPlaying = true;
-    tick();
-  }
-
-  function handleEnded(){
-    isPlaying = false;
+  function startTicking(){
     cancelAnimationFrame(rafId);
-    updateUI(plan.total + 1);
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function setupMediaSession(){
+    if(!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:'인터벌 타이머',
+      artist:`${plan.rounds} 라운드`,
+    });
+    navigator.mediaSession.setActionHandler('pause', ()=>{ player.pause(); });
+    navigator.mediaSession.setActionHandler('play', ()=>{ player.play().catch(()=>{}); });
+  }
+
+  function releaseTrack(){
+    if(trackUrl){ URL.revokeObjectURL(trackUrl); trackUrl = null; }
+  }
+
+  function goIdle(){
     els.controlsRun.classList.add('hidden');
     els.controlsIdle.classList.remove('hidden');
     els.config.classList.remove('hidden');
@@ -290,53 +320,96 @@
   els.btnStart.addEventListener('click', async ()=>{
     const cfg = readConfig();
     plan = buildPlan(cfg);
+
+    // iOS는 탭 제스처 안에서 동기적으로 play()가 호출된 엘리먼트만 잠금 해제한다.
+    // await 이전에 무음으로 먼저 해제해 두고, 렌더링이 끝나면 src만 교체한다.
+    const primer = silentWavUrl();
+    player.src = primer;
+    player.play().catch(()=>{});
+
     els.phaseLabel.textContent = '준비 중...';
+    els.btnStart.disabled = true;
     els.config.classList.add('hidden');
+
+    let buffer;
+    try{
+      buffer = await renderTrack(plan);
+    }catch(e){
+      URL.revokeObjectURL(primer);
+      els.btnStart.disabled = false;
+      els.phaseLabel.textContent = '오디오 생성 실패';
+      els.config.classList.remove('hidden');
+      return;
+    }
+
+    releaseTrack();
+    trackUrl = URL.createObjectURL(encodeWav(buffer.getChannelData(0), buffer.sampleRate));
+    URL.revokeObjectURL(primer);
+
+    player.src = trackUrl;
+    player.currentTime = 0;
+    try{
+      await player.play();
+    }catch(e){
+      els.btnStart.disabled = false;
+      els.phaseLabel.textContent = '재생을 시작할 수 없습니다';
+      els.config.classList.remove('hidden');
+      return;
+    }
+
+    setupMediaSession();
+    els.btnStart.disabled = false;
     els.controlsIdle.classList.add('hidden');
-    playBuffer = await renderTrack(plan);
-    if(audioCtx){ try{ await audioCtx.close(); }catch(e){} }
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    await audioCtx.resume();
-    startPlaybackFrom(0);
     els.controlsRun.classList.remove('hidden');
     els.btnPause.textContent = '일시정지';
+    startTicking();
   });
 
   els.btnPause.addEventListener('click', ()=>{
-    if(isPlaying){
-      const elapsed = getElapsed();
-      sourceNode.onended = null;
-      try{ sourceNode.stop(); }catch(e){}
-      pausedAt = elapsed;
-      isPlaying = false;
-      cancelAnimationFrame(rafId);
-      els.btnPause.textContent = '이어서';
+    if(player.paused){
+      player.play().catch(()=>{});
     } else {
-      audioCtx.resume().catch(()=>{});
-      startPlaybackFrom(pausedAt);
-      els.btnPause.textContent = '일시정지';
+      player.pause();
     }
   });
 
+  player.addEventListener('play', ()=>{
+    els.btnPause.textContent = '일시정지';
+    startTicking();
+  });
+
+  player.addEventListener('pause', ()=>{
+    if(!player.ended) els.btnPause.textContent = '이어서';
+    cancelAnimationFrame(rafId);
+  });
+
+  player.addEventListener('ended', ()=>{
+    cancelAnimationFrame(rafId);
+    updateUI(plan.total + 1);
+    goIdle();
+  });
+
+  // 잠금 해제 후 rAF는 멈춰 있으므로 화면을 즉시 재생 위치에 맞춘다.
   document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState==='visible' && isPlaying && audioCtx && audioCtx.state!=='closed'){
-      audioCtx.resume().catch(()=>{});
+    if(document.visibilityState === 'visible' && plan){
+      updateUI(getElapsed());
+      if(!player.paused) startTicking();
     }
   });
 
   els.btnReset.addEventListener('click', ()=>{
-    if(sourceNode){ sourceNode.onended = null; try{ sourceNode.stop(); }catch(e){} }
-    isPlaying = false;
-    pausedAt = 0;
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+    releaseTrack();
     cancelAnimationFrame(rafId);
+    plan = null;
     els.phaseLabel.textContent = '설정';
     els.phaseLabel.style.color = '';
-    els.roundLabel.textContent = '\u00A0';
+    els.roundLabel.textContent = ' ';
     els.clock.textContent = '00:00';
     els.ring.setAttribute('stroke-dashoffset', RING_CIRC);
-    els.controlsRun.classList.add('hidden');
-    els.controlsIdle.classList.remove('hidden');
-    els.config.classList.remove('hidden');
+    goIdle();
   });
 })();
 </script>

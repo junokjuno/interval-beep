@@ -7,6 +7,7 @@
     phaseLabel: document.getElementById('phaseLabel'),
     ring: document.getElementById('ring'),
     ringWrap: document.getElementById('ringWrap'),
+    stage: document.getElementById('stage'),
     hint: document.getElementById('hint'),
     clock: document.getElementById('clock'),
     roundLabel: document.getElementById('roundLabel'),
@@ -189,6 +190,9 @@
     // 구간 이름과 라운드 표시는 남겨 두어 완료 메시지는 계속 보인다.
     els.ringWrap.classList.toggle('hidden', idleScreen);
     els.hint.classList.toggle('hidden', !idleScreen);
+    // stage는 flex:1이라 남는 세로 공간을 전부 차지한다. 링이 없는 설정
+    // 화면에서 그대로 두면 텍스트 두 줄만 남기고 위아래로 큰 여백이 생긴다.
+    els.stage.classList.toggle('compact', idleScreen);
     els.btnStart.disabled = (state===PREPARING);
     els.btnPause.textContent = (state===PAUSED) ? '이어서' : '일시정지';
   }

@@ -58,6 +58,13 @@ body{
   gap:16px;
   padding:8px 0;
 }
+/* 설정 화면: 링이 없어 내용이 텍스트 두 줄뿐이라 flex:1을 주면 위아래로
+   크게 비어 보인다. 제 높이만큼만 차지하게 하고 위쪽에만 여백을 둔다. */
+.stage.compact{
+  flex:none;
+  padding:22px 0 10px;
+  gap:6px;
+}
 .phase-label{
   font-size:15px;
   font-weight:700;
@@ -79,7 +86,10 @@ body{
   font-size:min(15vw,68px);
   font-weight:600;
 }
-.round-label{ font-size:13px; color:var(--muted); font-weight:600; }
+.round-label{
+  font-size:22px; color:var(--text); font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
 
 .config{
   display:flex; flex-direction:column; gap:10px;

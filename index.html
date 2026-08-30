@@ -10,16 +10,16 @@
 <title>인터벌 타이머</title>
 <!-- 빌드 도구가 없어 파일명에 해시를 못 붙인다. 배포할 때 v 값을 올려야
      새 CSS/JS가 확실히 내려간다. 안 올리면 홈 화면 PWA가 옛 파일을 계속 쓴다. -->
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
   <div class="tabs" id="tabs">
-    <button class="tab is-active" data-mode="two">2단계</button>
-    <button class="tab" data-mode="three">3단계</button>
+    <button class="tab is-active" data-mode="two">기본 인터벌</button>
+    <button class="tab" data-mode="three">스텝 포함</button>
   </div>
 
-  <div class="stage">
+  <div class="stage" id="stage">
     <div class="phase-label" id="phaseLabel">설정</div>
     <div class="ring-wrap" id="ringWrap">
       <svg viewBox="0 0 120 120">
@@ -65,6 +65,6 @@
 
   <audio id="player" preload="auto" playsinline></audio>
 
-<script src="app.js?v=2" defer></script>
+<script src="app.js?v=3" defer></script>
 </body>
 </html>

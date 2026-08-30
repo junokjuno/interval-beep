@@ -10,7 +10,7 @@
 <title>인터벌 타이머</title>
 <!-- 빌드 도구가 없어 파일명에 해시를 못 붙인다. 배포할 때 v 값을 올려야
      새 CSS/JS가 확실히 내려간다. 안 올리면 홈 화면 PWA가 옛 파일을 계속 쓴다. -->
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
@@ -21,7 +21,7 @@
 
   <div class="stage">
     <div class="phase-label" id="phaseLabel">설정</div>
-    <div class="ring-wrap">
+    <div class="ring-wrap" id="ringWrap">
       <svg viewBox="0 0 120 120">
         <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
         <circle class="ring-fg" id="ring" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
@@ -61,10 +61,10 @@
     <button class="btn-secondary" id="btnReset">종료</button>
   </div>
 
-  <div class="hint">화면을 꺼도 소리는 계속 재생됩니다. Safari 공유 버튼 → “홈 화면에 추가”로 저장하면 앱처럼 쓸 수 있습니다.</div>
+  <div class="hint" id="hint">화면을 꺼도 소리는 계속 재생됩니다. Safari 공유 버튼 → “홈 화면에 추가”로 저장하면 앱처럼 쓸 수 있습니다.</div>
 
   <audio id="player" preload="auto" playsinline></audio>
 
-<script src="app.js?v=1" defer></script>
+<script src="app.js?v=2" defer></script>
 </body>
 </html>

@@ -47,9 +47,10 @@ body{
 }
 .tab.is-active{ background:var(--line); color:var(--text); }
 
+/* min-height:0 을 두면 링(flex:none)이 stage 밖으로 넘쳐 아래 설정과 겹친다.
+   넘칠 땐 body가 스크롤되게 두는 편이 안전하다. */
 .stage{
   flex:1;
-  min-height:0;   /* 없으면 링 크기 아래로 줄지 않아 아래 요소가 잘린다 */
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -64,8 +65,9 @@ body{
   text-transform:uppercase;
   color:var(--muted);
 }
-/* 3단계 모드는 설정이 7줄이라 높이가 빠듯하다. vh를 함께 걸어 링이 먼저 줄게 한다. */
-.ring-wrap{ position:relative; flex:none; width:min(66vw,300px,30vh); height:min(66vw,300px,30vh); }
+/* 설정 화면에서는 링을 감추므로 세션 중에는 넉넉히 키울 수 있다.
+   vh는 가로 모드처럼 높이가 짧은 경우의 안전장치. */
+.ring-wrap{ position:relative; flex:none; width:min(66vw,300px,45vh); height:min(66vw,300px,45vh); }
 .ring-wrap svg{ width:100%; height:100%; transform:rotate(-90deg); }
 .ring-bg{ fill:none; stroke:var(--line); stroke-width:10; }
 .ring-fg{ fill:none; stroke:var(--sprint); stroke-width:10; stroke-linecap:round; transition:stroke .2s ease; }

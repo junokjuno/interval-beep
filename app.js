@@ -6,6 +6,8 @@
     tabs: document.getElementById('tabs'),
     phaseLabel: document.getElementById('phaseLabel'),
     ring: document.getElementById('ring'),
+    ringWrap: document.getElementById('ringWrap'),
+    hint: document.getElementById('hint'),
     clock: document.getElementById('clock'),
     roundLabel: document.getElementById('roundLabel'),
     config: document.getElementById('config'),
@@ -183,6 +185,10 @@
     els.controlsIdle.classList.toggle('hidden', !idleScreen);
     els.controlsRun.classList.toggle('hidden', idleScreen);
     els.tabs.classList.toggle('locked', !idleScreen);
+    // 설정 화면에서 링은 00:00만 띄우며 자리만 차지한다. 그 자리를 설정에 준다.
+    // 구간 이름과 라운드 표시는 남겨 두어 완료 메시지는 계속 보인다.
+    els.ringWrap.classList.toggle('hidden', idleScreen);
+    els.hint.classList.toggle('hidden', !idleScreen);
     els.btnStart.disabled = (state===PREPARING);
     els.btnPause.textContent = (state===PAUSED) ? '이어서' : '일시정지';
   }

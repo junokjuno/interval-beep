@@ -89,6 +89,10 @@
     font-family:ui-monospace,"SF Mono",Menlo,monospace;
     font-variant-numeric:tabular-nums;
   }
+  .field input[type="checkbox"]{
+    width:24px; height:24px; margin:0;
+    accent-color:var(--sprint);
+  }
 
   .controls{
     display:flex; gap:12px; justify-content:center;
@@ -133,6 +137,7 @@
     <div class="field"><label>걷기/회복 (초)</label><input id="cfgWalk" type="number" min="1" value="10"></div>
     <div class="field"><label>라운드 수</label><input id="cfgRounds" type="number" min="1" value="8"></div>
     <div class="field"><label>시작 카운트다운 (초)</label><input id="cfgCountdown" type="number" min="0" value="5"></div>
+    <div class="field"><label>질주 중 1초 카운트음</label><input id="cfgSprintTick" type="checkbox" checked></div>
   </div>
 
   <div class="controls" id="controlsIdle">
@@ -165,6 +170,7 @@
     cfgWalk: document.getElementById('cfgWalk'),
     cfgRounds: document.getElementById('cfgRounds'),
     cfgCountdown: document.getElementById('cfgCountdown'),
+    cfgSprintTick: document.getElementById('cfgSprintTick'),
   };
   const player = document.getElementById('player');
 
@@ -182,6 +188,7 @@
       walk: Math.max(1, parseInt(els.cfgWalk.value,10) || 10),
       rounds: Math.max(1, parseInt(els.cfgRounds.value,10) || 8),
       countdown: Math.max(0, parseInt(els.cfgCountdown.value,10) || 0),
+      sprintTick: els.cfgSprintTick.checked,
     };
   }
 
@@ -206,6 +213,11 @@
       if(seg.phase==='sprint') beeps.push({t:seg.start, type:'sprint_start'});
       if(seg.phase==='walk') beeps.push({t:seg.start, type:'walk_start'});
       if(seg.phase==='done') beeps.push({t:seg.start, type:'done'});
+      // 질주 구간의 매 초마다. 시작(sprint_start)과 끝(walk_start)은 이미
+      // 전환음이 울리므로 그 사이 초에만 넣는다.
+      if(seg.phase==='sprint' && cfg.sprintTick){
+        for(let k=1; k < seg.end-seg.start; k++) beeps.push({t:seg.start+k, type:'tick'});
+      }
     });
     return {segments, beeps, total, rounds:cfg.rounds};
   }
@@ -213,23 +225,34 @@
   async function renderTrack(p){
     const totalSeconds = p.total + 1.5;
     const ctx = new OfflineAudioContext(1, Math.ceil(totalSeconds*SAMPLE_RATE), SAMPLE_RATE);
-    function beep(time, freq, dur, gainVal){
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0, time);
-      g.gain.linearRampToValueAtTime(gainVal, time+0.01);
-      g.gain.linearRampToValueAtTime(0, time+dur);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(time);
-      osc.stop(time+dur+0.02);
+    // 순음은 0.9만 넘어도 클리핑이라 진폭으로는 더 키울 수 없다.
+    // 전환음은 배음을 얹고 감쇠 대신 유지 구간을 둬서 실효 음량을 올린다.
+    // 홀수 배음(사각파에 가까운 음색)이 같은 피크에서 가장 크게 들리고
+    // 바람·차 소리를 잘 뚫는다. 배음끼리 위상이 어긋나 합이 1.46이어도
+    // 실제 피크는 0.95 근처라 클리핑되지 않는다.
+    const PURE = [[1, 1]];
+    const RICH = [[1, 0.5], [3, 0.3], [5, 0.2]];
+    function beep(time, freq, dur, peak, partials){
+      (partials || PURE).forEach(([mult, rel])=>{
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq * mult;
+        const g = ctx.createGain();
+        const amp = peak * rel;
+        g.gain.setValueAtTime(0, time);
+        g.gain.linearRampToValueAtTime(amp, time+0.005);
+        g.gain.setValueAtTime(amp, time+dur*0.75);
+        g.gain.linearRampToValueAtTime(0, time+dur);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(time);
+        osc.stop(time+dur+0.02);
+      });
     }
     p.beeps.forEach(e=>{
-      if(e.type==='tick') beep(e.t, 660, 0.08, 0.45);
-      else if(e.type==='sprint_start'){ beep(e.t,880,0.12,0.9); beep(e.t+0.16,880,0.12,0.9); }
-      else if(e.type==='walk_start'){ beep(e.t,440,0.22,0.8); }
-      else if(e.type==='done'){ beep(e.t,523,0.15,0.9); beep(e.t+0.18,659,0.15,0.9); beep(e.t+0.36,784,0.22,0.9); }
+      if(e.type==='tick') beep(e.t, 660, 0.08, 0.45, PURE);
+      else if(e.type==='sprint_start'){ beep(e.t,880,0.14,1.42,RICH); beep(e.t+0.18,880,0.14,1.42,RICH); }
+      else if(e.type==='walk_start'){ beep(e.t,440,0.26,1.42,RICH); }
+      else if(e.type==='done'){ beep(e.t,523,0.15,1.30,RICH); beep(e.t+0.18,659,0.15,1.30,RICH); beep(e.t+0.36,784,0.22,1.30,RICH); }
     });
     return await ctx.startRendering();
   }

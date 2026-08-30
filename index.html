@@ -211,8 +211,8 @@
     const total = t;
 
     const beeps = [];
-    const tickCount = Math.min(3, cfg.countdown);
-    for(let i=tickCount; i>=1; i--) beeps.push({t: cfg.countdown - i, type:'tick'});
+    // 카운트다운 전 구간에서 1초마다. 마지막 3초만 울리면 앞부분이 통째로 조용해진다.
+    for(let k=0; k<cfg.countdown; k++) beeps.push({t:k, type:'tick'});
     segments.forEach(seg=>{
       if(seg.phase==='sprint') beeps.push({t:seg.start, type:'sprint_start'});
       if(seg.phase==='walk') beeps.push({t:seg.start, type:'walk_start'});

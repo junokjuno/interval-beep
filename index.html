@@ -158,8 +158,10 @@
 
 <script>
 (function(){
+  'use strict';
+
+  /* ---------- DOM ---------- */
   const els = {
-    eyebrow: document.getElementById('eyebrow'),
     phaseLabel: document.getElementById('phaseLabel'),
     ring: document.getElementById('ring'),
     clock: document.getElementById('clock'),
@@ -181,21 +183,36 @@
   const RING_CIRC = 2 * Math.PI * 52;
   const COLORS = { ready:'#5B7A99', sprint:'#FF5A36', walk:'#33D6A6', done:'#FFD166' };
   const PHASE_TEXT = { ready:'준비', sprint:'전력질주', walk:'걷기 / 회복', done:'완료' };
-  // 비프음 최고 주파수가 880Hz라 22050Hz면 충분하고, 블롭 크기가 절반으로 줄어든다.
+  // 비프음 최고 배음이 4400Hz라 22050Hz면 충분하고, 블롭 크기가 절반으로 줄어든다.
   const SAMPLE_RATE = 22050;
 
-  let plan = null, rafId = null, trackUrl = null;
+  /* ---------- 상태 ----------
+     화면 전환과 이벤트 처리는 전부 이 값 하나만 보고 결정한다.
+     PREPARING 중에는 무음 프라이머가 재생되는데, 여기서 오는
+     ended/pause 이벤트를 세션 종료로 오해하면 안 된다. */
+  const IDLE='idle', PREPARING='preparing', RUNNING='running', PAUSED='paused', DONE='done';
+  let state = IDLE;
+  let plan = null;
+  let rafId = 0;
+  let trackUrl = null;
+  let primerUrl = null;
 
+  /* ---------- 설정 ---------- */
   function readConfig(){
+    const int = (el, fallback, min) => {
+      const v = parseInt(el.value, 10);
+      return Math.max(min, isNaN(v) ? fallback : v);
+    };
     return {
-      sprint: Math.max(1, parseInt(els.cfgSprint.value,10) || 20),
-      walk: Math.max(1, parseInt(els.cfgWalk.value,10) || 10),
-      rounds: Math.max(1, parseInt(els.cfgRounds.value,10) || 8),
-      countdown: Math.max(0, parseInt(els.cfgCountdown.value,10) || 0),
+      sprint: int(els.cfgSprint, 20, 1),
+      walk: int(els.cfgWalk, 10, 1),
+      rounds: int(els.cfgRounds, 8, 1),
+      countdown: int(els.cfgCountdown, 5, 0),
       sprintTick: els.cfgSprintTick.checked,
     };
   }
 
+  /* ---------- 세션 구성 ---------- */
   function buildPlan(cfg){
     const segments = [];
     let t = 0;
@@ -207,37 +224,36 @@
       segments.push({start:t, end:t+cfg.walk, phase:'walk', round:r});
       t += cfg.walk;
     }
-    segments.push({start:t, end:t+1.2, phase:'done', round:cfg.rounds});
     const total = t;
+    segments.push({start:t, end:t+1.2, phase:'done', round:cfg.rounds});
 
     const beeps = [];
-    // 카운트다운 전 구간에서 1초마다. 마지막 3초만 울리면 앞부분이 통째로 조용해진다.
+    // 카운트다운 전 구간에서 1초마다.
     for(let k=0; k<cfg.countdown; k++) beeps.push({t:k, type:'tick'});
     segments.forEach(seg=>{
-      if(seg.phase==='sprint') beeps.push({t:seg.start, type:'sprint_start'});
-      if(seg.phase==='walk') beeps.push({t:seg.start, type:'walk_start'});
-      if(seg.phase==='done') beeps.push({t:seg.start, type:'done'});
-      // 질주 구간의 매 초마다. 시작(sprint_start)과 끝(walk_start)은 이미
-      // 전환음이 울리므로 그 사이 초에만 넣는다.
-      if(seg.phase==='sprint' && cfg.sprintTick){
-        for(let k=1; k < seg.end-seg.start; k++) beeps.push({t:seg.start+k, type:'tick'});
+      if(seg.phase==='sprint'){
+        beeps.push({t:seg.start, type:'sprint_start'});
+        // 질주 중 1초 카운트음. 시작과 끝은 전환음이 이미 울리므로 사이 초에만.
+        if(cfg.sprintTick){
+          for(let k=1; k < seg.end-seg.start; k++) beeps.push({t:seg.start+k, type:'tick'});
+        }
       }
+      else if(seg.phase==='walk') beeps.push({t:seg.start, type:'walk_start'});
+      else if(seg.phase==='done') beeps.push({t:seg.start, type:'done'});
     });
     return {segments, beeps, total, rounds:cfg.rounds};
   }
 
+  /* ---------- 오디오 생성 ---------- */
   async function renderTrack(p){
-    const totalSeconds = p.total + 1.5;
-    const ctx = new OfflineAudioContext(1, Math.ceil(totalSeconds*SAMPLE_RATE), SAMPLE_RATE);
-    // 순음은 0.9만 넘어도 클리핑이라 진폭으로는 더 키울 수 없다.
-    // 전환음은 배음을 얹고 감쇠 대신 유지 구간을 둬서 실효 음량을 올린다.
+    const ctx = new OfflineAudioContext(1, Math.ceil((p.total+1.5)*SAMPLE_RATE), SAMPLE_RATE);
     // 홀수 배음(사각파에 가까운 음색)이 같은 피크에서 가장 크게 들리고
     // 바람·차 소리를 잘 뚫는다. 배음끼리 위상이 어긋나 합이 1.46이어도
     // 실제 피크는 0.95 근처라 클리핑되지 않는다.
-    const PURE = [[1, 1]];
-    const RICH = [[1, 0.5], [3, 0.3], [5, 0.2]];
+    const PURE = [[1,1]];
+    const RICH = [[1,0.5],[3,0.3],[5,0.2]];
     function beep(time, freq, dur, peak, partials){
-      (partials || PURE).forEach(([mult, rel])=>{
+      partials.forEach(([mult, rel])=>{
         const osc = ctx.createOscillator();
         osc.type = 'sine';
         osc.frequency.value = freq * mult;
@@ -258,11 +274,11 @@
       else if(e.type==='walk_start'){ beep(e.t,440,0.26,1.42,RICH); }
       else if(e.type==='done'){ beep(e.t,523,0.15,1.30,RICH); beep(e.t+0.18,659,0.15,1.30,RICH); beep(e.t+0.36,784,0.22,1.30,RICH); }
     });
-    return await ctx.startRendering();
+    return ctx.startRendering();
   }
 
-  // 16bit PCM mono WAV. iOS는 백그라운드에서 WebAudio를 정지시키므로
-  // 렌더링 결과를 <audio> 엘리먼트가 재생할 수 있는 파일로 바꾼다.
+  // iOS는 백그라운드에서 WebAudio를 정지시키므로 렌더링 결과를
+  // <audio> 엘리먼트가 재생할 수 있는 16bit PCM WAV 파일로 바꾼다.
   function encodeWav(samples, sampleRate){
     const dataSize = samples.length * 2;
     const buf = new ArrayBuffer(44 + dataSize);
@@ -280,11 +296,18 @@
       view.setInt16(o, s < 0 ? s*0x8000 : s*0x7FFF, true);
       o += 2;
     }
-    return new Blob([buf], {type:'audio/wav'});
+    return URL.createObjectURL(new Blob([buf], {type:'audio/wav'}));
   }
 
-  function silentWavUrl(){
-    return URL.createObjectURL(encodeWav(new Float32Array(1024), SAMPLE_RATE));
+  /* ---------- 화면 ---------- */
+  // 표시할 화면은 상태에서만 결정한다. 개별 핸들러가 각자 토글하지 않는다.
+  function renderScreen(){
+    const idleScreen = (state===IDLE || state===DONE);
+    els.config.classList.toggle('hidden', !idleScreen);
+    els.controlsIdle.classList.toggle('hidden', !idleScreen);
+    els.controlsRun.classList.toggle('hidden', idleScreen);
+    els.btnStart.disabled = (state===PREPARING);
+    els.btnPause.textContent = (state===PAUSED) ? '이어서' : '일시정지';
   }
 
   function findSegment(elapsed){
@@ -292,17 +315,19 @@
     return plan.segments[plan.segments.length-1];
   }
 
-  function updateUI(elapsed){
+  function renderClock(elapsed){
+    if(!plan) return;
     const seg = findSegment(elapsed);
     const remain = Math.max(0, Math.ceil(seg.end - elapsed));
-    const mm = String(Math.floor(remain/60)).padStart(2,'0');
-    const ss = String(remain%60).padStart(2,'0');
-    els.clock.textContent = mm+':'+ss;
+    els.clock.textContent =
+      String(Math.floor(remain/60)).padStart(2,'0') + ':' + String(remain%60).padStart(2,'0');
     els.phaseLabel.textContent = PHASE_TEXT[seg.phase];
     els.phaseLabel.style.color = COLORS[seg.phase];
     els.ring.style.stroke = COLORS[seg.phase];
-    els.roundLabel.textContent = seg.phase==='ready' ? '곧 시작합니다' :
-      seg.phase==='done' ? '수고하셨습니다' : `${seg.round} / ${plan.rounds}`;
+    els.roundLabel.textContent =
+      seg.phase==='ready' ? '곧 시작합니다' :
+      seg.phase==='done'  ? '수고하셨습니다' :
+      seg.round + ' / ' + plan.rounds;
 
     const segDur = Math.max(0.001, seg.end - seg.start);
     const progress = Math.min(1, Math.max(0, (elapsed - seg.start)/segDur));
@@ -310,134 +335,150 @@
     els.ring.setAttribute('stroke-dashoffset', RING_CIRC * (1-progress));
   }
 
-  // 화면 표시는 오디오 자체의 재생 위치를 따라간다.
-  // 잠금 해제 후에도 소리와 어긋나지 않는다.
-  function getElapsed(){ return player.currentTime; }
-
-  function tick(){
-    updateUI(getElapsed());
-    if(!player.paused) rafId = requestAnimationFrame(tick);
-  }
-
-  function startTicking(){
-    cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(tick);
-  }
-
-  function setupMediaSession(){
-    if(!('mediaSession' in navigator)) return;
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title:'인터벌 타이머',
-      artist:`${plan.rounds} 라운드`,
-    });
-    navigator.mediaSession.setActionHandler('pause', ()=>{ player.pause(); });
-    navigator.mediaSession.setActionHandler('play', ()=>{ player.play().catch(()=>{}); });
-  }
-
-  function releaseTrack(){
-    if(trackUrl){ URL.revokeObjectURL(trackUrl); trackUrl = null; }
-  }
-
-  function goIdle(){
-    els.controlsRun.classList.add('hidden');
-    els.controlsIdle.classList.remove('hidden');
-    els.config.classList.remove('hidden');
-  }
-
-  els.btnStart.addEventListener('click', async ()=>{
-    const cfg = readConfig();
-    plan = buildPlan(cfg);
-
-    // iOS는 탭 제스처 안에서 동기적으로 play()가 호출된 엘리먼트만 잠금 해제한다.
-    // await 이전에 무음으로 먼저 해제해 두고, 렌더링이 끝나면 src만 교체한다.
-    const primer = silentWavUrl();
-    player.src = primer;
-    player.play().catch(()=>{});
-
-    els.phaseLabel.textContent = '준비 중...';
-    els.btnStart.disabled = true;
-    els.config.classList.add('hidden');
-
-    let buffer;
-    try{
-      buffer = await renderTrack(plan);
-    }catch(e){
-      URL.revokeObjectURL(primer);
-      els.btnStart.disabled = false;
-      els.phaseLabel.textContent = '오디오 생성 실패';
-      els.config.classList.remove('hidden');
-      return;
-    }
-
-    releaseTrack();
-    trackUrl = URL.createObjectURL(encodeWav(buffer.getChannelData(0), buffer.sampleRate));
-    URL.revokeObjectURL(primer);
-
-    player.src = trackUrl;
-    player.currentTime = 0;
-    try{
-      await player.play();
-    }catch(e){
-      els.btnStart.disabled = false;
-      els.phaseLabel.textContent = '재생을 시작할 수 없습니다';
-      els.config.classList.remove('hidden');
-      return;
-    }
-
-    setupMediaSession();
-    els.btnStart.disabled = false;
-    els.controlsIdle.classList.add('hidden');
-    els.controlsRun.classList.remove('hidden');
-    els.btnPause.textContent = '일시정지';
-    startTicking();
-  });
-
-  els.btnPause.addEventListener('click', ()=>{
-    if(player.paused){
-      player.play().catch(()=>{});
-    } else {
-      player.pause();
-    }
-  });
-
-  player.addEventListener('play', ()=>{
-    els.btnPause.textContent = '일시정지';
-    startTicking();
-  });
-
-  player.addEventListener('pause', ()=>{
-    if(!player.ended) els.btnPause.textContent = '이어서';
-    cancelAnimationFrame(rafId);
-  });
-
-  player.addEventListener('ended', ()=>{
-    cancelAnimationFrame(rafId);
-    updateUI(plan.total + 1);
-    goIdle();
-  });
-
-  // 잠금 해제 후 rAF는 멈춰 있으므로 화면을 즉시 재생 위치에 맞춘다.
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState === 'visible' && plan){
-      updateUI(getElapsed());
-      if(!player.paused) startTicking();
-    }
-  });
-
-  els.btnReset.addEventListener('click', ()=>{
-    player.pause();
-    player.removeAttribute('src');
-    player.load();
-    releaseTrack();
-    cancelAnimationFrame(rafId);
-    plan = null;
+  function clearClock(){
     els.phaseLabel.textContent = '설정';
     els.phaseLabel.style.color = '';
     els.roundLabel.textContent = ' ';
     els.clock.textContent = '00:00';
     els.ring.setAttribute('stroke-dashoffset', RING_CIRC);
-    goIdle();
+  }
+
+  /* ---------- 진행 표시 ----------
+     화면은 오디오 자체의 재생 위치를 따라간다. 잠금 해제 후에도 소리와 어긋나지 않는다. */
+  function elapsed(){ return player.currentTime; }
+
+  function frame(){
+    renderClock(elapsed());
+    rafId = (state===RUNNING) ? requestAnimationFrame(frame) : 0;
+  }
+  function startTicking(){ cancelAnimationFrame(rafId); rafId = requestAnimationFrame(frame); }
+  function stopTicking(){ cancelAnimationFrame(rafId); rafId = 0; }
+
+  /* ---------- 리소스 ---------- */
+  function revoke(url){ if(url) URL.revokeObjectURL(url); }
+
+  function silentPrimerUrl(){
+    return encodeWav(new Float32Array(Math.round(SAMPLE_RATE*0.25)), SAMPLE_RATE);
+  }
+
+  function setupMediaSession(){
+    if(!('mediaSession' in navigator)) return;
+    try{
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title:'인터벌 타이머', artist: plan.rounds + ' 라운드',
+      });
+      navigator.mediaSession.setActionHandler('pause', pause);
+      navigator.mediaSession.setActionHandler('play', resume);
+    }catch(e){/* 지원 안 하면 무시 */}
+  }
+
+  /* ---------- 전환 ---------- */
+  async function start(){
+    if(state!==IDLE && state!==DONE) return;
+    plan = buildPlan(readConfig());
+    state = PREPARING;
+    renderScreen();
+    els.phaseLabel.textContent = '준비 중...';
+
+    // iOS는 탭 제스처 안에서 동기적으로 play()가 호출된 엘리먼트만 잠금 해제한다.
+    // await 이전에 무음으로 먼저 해제해 둔다. loop을 켜야 프라이머가 끝나면서
+    // ended를 쏘지 않는다.
+    revoke(primerUrl);
+    primerUrl = silentPrimerUrl();
+    player.loop = true;
+    player.src = primerUrl;
+    player.play().catch(()=>{});
+
+    let url;
+    try{
+      const buffer = await renderTrack(plan);
+      url = encodeWav(buffer.getChannelData(0), buffer.sampleRate);
+    }catch(e){
+      return fail('오디오 생성 실패');
+    }
+    if(state!==PREPARING){ revoke(url); return; }  // 준비 중 종료를 눌렀다면 버린다
+
+    revoke(trackUrl);
+    trackUrl = url;
+    player.loop = false;
+    player.src = trackUrl;
+    try{
+      await player.play();
+    }catch(e){
+      return fail('재생을 시작할 수 없습니다');
+    }
+    if(state!==PREPARING){ return; }
+
+    state = RUNNING;
+    renderScreen();
+    setupMediaSession();
+    startTicking();
+  }
+
+  function fail(message){
+    state = IDLE;
+    stopTicking();
+    renderScreen();
+    els.phaseLabel.textContent = message;
+  }
+
+  function pause(){
+    if(state!==RUNNING) return;
+    state = PAUSED;
+    player.pause();
+    stopTicking();
+    renderScreen();
+  }
+
+  function resume(){
+    if(state!==PAUSED) return;
+    state = RUNNING;
+    player.play().catch(()=>{ pause(); });
+    renderScreen();
+    startTicking();
+  }
+
+  function finish(){
+    state = DONE;
+    stopTicking();
+    renderClock(plan.total + 1);
+    renderScreen();
+  }
+
+  function reset(){
+    state = IDLE;
+    stopTicking();
+    player.pause();
+    player.loop = false;
+    player.removeAttribute('src');
+    player.load();
+    revoke(trackUrl); trackUrl = null;
+    revoke(primerUrl); primerUrl = null;
+    plan = null;
+    clearClock();
+    renderScreen();
+  }
+
+  /* ---------- 이벤트 ----------
+     전부 상태로 가드한다. PREPARING 중 프라이머가 내는 이벤트는 무시된다. */
+  els.btnStart.addEventListener('click', start);
+  els.btnPause.addEventListener('click', ()=>{ state===PAUSED ? resume() : pause(); });
+  els.btnReset.addEventListener('click', reset);
+
+  player.addEventListener('ended', ()=>{ if(state===RUNNING) finish(); });
+
+  // 전화 수신 등으로 시스템이 멈춘 경우에도 화면을 맞춘다.
+  player.addEventListener('pause', ()=>{
+    if(state===RUNNING && !player.ended) pause();
   });
+
+  // 잠금 해제 후 rAF는 멈춰 있으므로 화면을 즉시 재생 위치에 맞춘다.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState!=='visible') return;
+    if(state===RUNNING){ renderClock(elapsed()); startTicking(); }
+  });
+
+  renderScreen();
 })();
 </script>
 </body>
